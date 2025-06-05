@@ -14,7 +14,7 @@ export default function TutorialIntro({ onNext }) {
         className="cursor-pointer bg-gradient-to-br from-indigo-900 to-blue-700 p-6 rounded-xl shadow-xl max-w-md mx-auto hover:scale-105 transform transition"
       >
         <img
-          src="/level1.png"
+          src="https://github.com/dptriani/galaxsim/blob/main/public/level1.png"
           alt="Level 1: The Early Universe"
           className="rounded-lg shadow-md w-full mb-4"
         />
