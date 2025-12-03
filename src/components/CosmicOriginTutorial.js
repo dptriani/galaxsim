@@ -198,30 +198,29 @@ export default function CosmicOriginTutorial({ onRestart }) {
     return () => clearInterval(interval);
   }, [isRunning, timeSpeed]);
 
-  // Inject filled ripple hotspot
+  // Inject a smooth Gaussian hotspot (more CMB-like)
   const handleCellClick = (row, col) => {
     const newGrid = grid.map((r) => [...r]);
 
-    const ripplePattern = [
-      { dist: 0, temp: MAX_TEMP },
-      { dist: 1, temp: 6 },
-      { dist: 2, temp: 4 },
-      { dist: 3, temp: 2 },
-    ];
+    const amplitude = 2.5;  // peak temperature
+    const sigma = 2;        // controls spot size (in grid cells)
+    const radius = Math.ceil(3 * sigma);
 
-    ripplePattern.forEach(({ dist, temp }, stepIndex) => {
-      for (let dx = -dist; dx <= dist; dx++) {
-        for (let dy = -dist; dy <= dist; dy++) {
-          if (Math.abs(dx) + Math.abs(dy) <= dist) {
-            const x = row + dx;
-            const y = col + dy;
-            if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
-              newGrid[x][y] = Math.max(newGrid[x][y], temp);
-            }
-          }
-        }
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        const x = row + dx;
+        const y = col + dy;
+        if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) continue;
+
+        const r2 = dx * dx + dy * dy;
+        const value = amplitude * Math.exp(-r2 / (2 * sigma * sigma));
+
+        // Add on top of existing fluctuations, clamp to allowed range
+        const updated =
+          Math.max(MIN_TEMP, Math.min(MAX_TEMP, newGrid[x][y] + value));
+        newGrid[x][y] = updated;
       }
-    });
+    }
 
     setGrid(newGrid);
   };
@@ -243,16 +242,16 @@ export default function CosmicOriginTutorial({ onRestart }) {
       </p>
       <p className="text-blue-500 font-mono text-lg mb-4">
         Universe Age: {cosmicTime} Myr
-      </p>
+      </p> 
 
       {/* Grid */}
-      <div className="overflow-auto border border-gray-700 mx-auto" style={{ maxHeight: '80vh' }}>
+      <div className="overflow-auto border border-gray-700 mx-auto" style={{ maxHeight: '60vh' }}>
         <div
           className="grid"
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-            width: 'min(100%, 800px)',
+            width: 'min(100%, 360px)',
           }}
         >
           {grid.map((row, rowIndex) =>
