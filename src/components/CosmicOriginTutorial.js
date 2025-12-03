@@ -142,6 +142,22 @@ const BRUSHES = {
 const GRID_SIZE = 64;
 const MAX_TEMP = 3;
 const MIN_TEMP = -3;
+const BASE_TEMP = -2.0;
+
+// toy CMB spectrum: big first peak, smaller later peaks
+const WMAP_TOY = [
+  { ell: 2,   cl: 900 },
+  { ell: 22,  cl: 950 },
+  { ell: 76,  cl: 1400 },
+  { ell: 172, cl: 5600 }, // main acoustic peak
+  { ell: 250, cl: 4200 },
+  { ell: 332, cl: 2600 }, // 2nd peak
+  { ell: 450, cl: 2100 },
+  { ell: 625, cl: 1600 }, // 3rd-ish peak
+  { ell: 800, cl: 1200 },
+  { ell: 975, cl: 900 },
+  { ell: 1150, cl: 700 },
+];
 
 // Gaussian helper
 function applyGaussianBump(grid, row, col, radius, amplitude) {
@@ -195,27 +211,59 @@ function applyGaussianErase(grid, row, col, radius) {
   return newGrid;
 }
 
+// ---- toy CMB spectrum in angle space (for gray dashed line) ----
+
+// we'll sample 80 points from left (large angle) to right (small angle)
+const TARGET_LEN = 80;
+
+// x in [0, 1] where 0 = large angles (~90 deg), 1 = small angles (~0.07 deg)
+function toyCMBShape01(x) {
+  // gentle baseline that rises then falls a bit
+  let y = 0.15 + 0.05 * Math.cos(Math.PI * x);
+
+  // big first peak around x ~ 0.35 (angle ~ 1 deg)
+  y += 1.0 * Math.exp(-Math.pow((x - 0.35) / 0.08, 2));
+
+  // smaller second bump around x ~ 0.58
+  y += 0.40 * Math.exp(-Math.pow((x - 0.58) / 0.06, 2));
+
+  // another small bump around x ~ 0.74
+  y += 0.25 * Math.exp(-Math.pow((x - 0.74) / 0.05, 2));
+
+  // little extra tail lift
+  y += 0.10 * Math.exp(-Math.pow((x - 0.90) / 0.04, 2));
+
+  return y;
+}
+
+function buildToyCMBTarget() {
+  const vals = [];
+  for (let i = 0; i < TARGET_LEN; i++) {
+    const x = i / (TARGET_LEN - 1); // 0 → 1
+    vals.push(toyCMBShape01(x));
+  }
+  return normalize01(vals); // reuse your existing normalize01
+}
+
+// nice angle tick labels to show on the x-axis
+const ANGLE_TICKS = ['90°', '2°', '0.5°', '0.2°'];
+
 export default function CosmicOriginTutorial({ onRestart }) {
-  const [targetSpectrum, setTargetSpectrum] = useState([]);
+  const [targetSpectrum, setTargetSpectrum] = useState(WMAP_TOY);
   const [grid, setGrid] = useState(
-    // tiny initial fluctuations ~ like real CMB (~1e-5 but here exaggerated)
     Array.from({ length: GRID_SIZE }, () =>
-      Array.from(
-        { length: GRID_SIZE },
-        () => -2 + (Math.random() - 0.5) * 0.4 // between -0.1 and +0.1
-      )
+      Array.from({ length: GRID_SIZE }, () => BASE_TEMP)
     )
   );
+
   const [brush, setBrush] = useState(BRUSHES.MEDIUM);
   const [isPainting, setIsPainting] = useState(false);
 
-    const resetGrid = () =>
-      Array.from({ length: GRID_SIZE }, () =>
-        Array.from(
-          { length: GRID_SIZE },
-          () => -2.0 + (Math.random() - 0.5) * 0.4
-        )
-      );
+  const resetGrid = () =>
+    Array.from({ length: GRID_SIZE }, () =>
+      Array.from({ length: GRID_SIZE }, () => BASE_TEMP)
+    );
+
 
     const handleRestartClick = () => {
       setGrid(resetGrid());
@@ -223,28 +271,45 @@ export default function CosmicOriginTutorial({ onRestart }) {
       setIsPainting(false);
     };
 
-  // Load target WMAP spectrum once on mount
-  useEffect(() => {
-    fetch(`${process.env.PUBLIC_URL}/wmap_tt_binned.json`)
-      .then((r) => r.json())
-      .then(setTargetSpectrum)
-      .catch(() => setTargetSpectrum([]));
-  }, []);
 
   // ---- derive current spectrum from grid state ----
+  // ---- derive current spectrum from grid state ----
+  // We build 3 bands: large-scale, medium-scale, small-scale
+  // and turn them into 5 bins with a flat left side + peak in the middle.
   const currentSpectrum = useMemo(() => {
-    const vals = SCALES.map((r) => variance2D(blurAtRadius(grid, r)));
-    return normalize01(vals);
+    if (!grid || !grid.length) return [];
+
+    // Heavily blurred = only large-scale structure
+    const blurLarge = blurAtRadius(grid, 8);
+    // Moderately blurred = large + medium scales
+    const blurMid = blurAtRadius(grid, 3);
+
+    const vLarge = Math.max(1e-8, variance2D(blurLarge));
+    const vMidTotal = variance2D(blurMid);
+    const vSmallTotal = variance2D(grid);
+
+    // Extra power from medium scales and small scales
+    const vMidExtra = Math.max(0, vMidTotal - vLarge);
+    const vSmallExtra = Math.max(0, vSmallTotal - vMidTotal);
+
+    // Build 5 bins:
+    //  - first two: flat baseline (large-scale)
+    //  - middle: big peak from medium scales
+    //  - right: mix of medium + small scales
+    const raw = [
+      vLarge,                               // left: flat
+      vLarge,                               // left: flat
+      vLarge + 1.3 * vMidExtra,             // main peak
+      vLarge + 0.7 * vMidExtra + 0.5 * vSmallExtra,
+      vLarge + 0.3 * vMidExtra + 0.8 * vSmallExtra,
+    ];
+
+    return normalize01(raw);
   }, [grid]);
 
-  // prepare target spectrum and sparse ticks
-  const sorted = [...targetSpectrum].sort(
-    (a, b) => (a.ell ?? a.l) - (b.ell ?? b.l)
-  );
-  const targetEll = sorted.map((d) => d.ell ?? d.l);
-  const targetClRaw = sorted.map((d) => d.cl ?? d.CL ?? d.Cl ?? 0);
-  const targetClNorm = normalize01(targetClRaw);
-  const tickLabels = pickTicks(targetEll, 7);
+  // toy target spectrum & angle ticks (smooth CMB-like gray curve)
+  const targetClNorm = useMemo(() => buildToyCMBTarget(), []);
+  const tickLabels = ANGLE_TICKS;
 
   const targetResampled = useMemo(() => {
     if (!targetClNorm.length || !currentSpectrum.length) return [];
@@ -252,6 +317,19 @@ export default function CosmicOriginTutorial({ onRestart }) {
       resampleToLength(targetClNorm, currentSpectrum.length)
     );
   }, [targetClNorm, currentSpectrum.length]);
+
+    const matchScore = useMemo(() => {
+      if (!currentSpectrum.length || !targetResampled.length) return null;
+      const n = Math.min(currentSpectrum.length, targetResampled.length);
+      let sumSq = 0;
+      for (let i = 0; i < n; i++) {
+        const diff = currentSpectrum[i] - targetResampled[i];
+        sumSq += diff * diff;
+      }
+      const rmse = Math.sqrt(sumSq / n);   // both are normalized 0–1
+      const score = Math.max(0, 1 - rmse); // 1 = perfect match, 0 = terrible
+      return Math.round(score * 100);
+    }, [currentSpectrum, targetResampled]);
 
   // Color map using clamped HSL
   const getColor = (temp) => {
@@ -414,9 +492,19 @@ export default function CosmicOriginTutorial({ onRestart }) {
 
             <SpectrumChart
               current={currentSpectrum}
-              target={targetResampled}
+              target={targetClNorm}
               labels={tickLabels}
             />
+
+            {matchScore !== null && (
+              <p className="mt-2 text-xs text-gray-700">
+                Match score:{' '}
+                <span className="font-semibold">{matchScore}%</span>
+                <span className="text-gray-500">
+                  {' '}· Try to get above 80%
+                </span>
+              </p>
+            )}
 
             {/* Training-wheel hints */}
             <div className="mt-3 text-xs text-gray-700 text-left space-y-1">
