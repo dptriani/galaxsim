@@ -137,6 +137,7 @@ export default function CosmicOriginTutorial({ onRestart }) {
   const [cosmicTime, setCosmicTime] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [timeSpeed, setTimeSpeed] = useState(1);
+  const [isPainting, setIsPainting] = useState(false);
 
   // ---- derive current spectrum from grid state ----
   const currentSpectrum = useMemo(() => {
@@ -245,8 +246,14 @@ export default function CosmicOriginTutorial({ onRestart }) {
       </p> 
 
       {/* Grid */}
-      <div className="overflow-auto border border-gray-700 mx-auto inline-block"
-  style={{ maxHeight: '60vh', width: 'min(100%, 360px)' }}>
+      <div
+          className="overflow-auto border border-gray-700 mx-auto inline-block"
+          style={{ maxHeight: '60vh', width: 'min(100%, 360px)' }}
+          onMouseDown={() => setIsPainting(true)}
+          onMouseUp={() => setIsPainting(false)}
+          onMouseLeave={() => setIsPainting(false)}
+        >
+
         <div
           className="grid"
           style={{
@@ -258,15 +265,19 @@ export default function CosmicOriginTutorial({ onRestart }) {
           {grid.map((row, rowIndex) =>
             row.map((cell, colIndex) => (
               <div
-                key={`${rowIndex}-${colIndex}`}
-                onClick={() => handleCellClick(rowIndex, colIndex)}
-                style={{
-                  width: '100%',
-                  aspectRatio: '1',
-                  backgroundColor: getColor(cell),
-                  transition: 'background-color 0.3s ease',
-                }}
-              />
+              key={`${rowIndex}-${colIndex}`}
+              onMouseDown={() => handleCellClick(rowIndex, colIndex)}
+              onMouseEnter={() => {
+                if (isPainting) handleCellClick(rowIndex, colIndex);
+              }}
+              style={{
+                width: '100%',
+                aspectRatio: '1',
+                backgroundColor: getColor(cell),
+                transition: 'background-color 0.2s ease',
+              }}
+            />
+
             ))
           )}
         </div>
