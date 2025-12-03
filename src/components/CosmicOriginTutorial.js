@@ -209,6 +209,20 @@ export default function CosmicOriginTutorial({ onRestart }) {
   const [brush, setBrush] = useState(BRUSHES.MEDIUM);
   const [isPainting, setIsPainting] = useState(false);
 
+    const resetGrid = () =>
+      Array.from({ length: GRID_SIZE }, () =>
+        Array.from(
+          { length: GRID_SIZE },
+          () => -2.0 + (Math.random() - 0.5) * 0.4
+        )
+      );
+
+    const handleRestartClick = () => {
+      setGrid(resetGrid());
+      setBrush(BRUSHES.MEDIUM);
+      setIsPainting(false);
+    };
+
   // Load target WMAP spectrum once on mount
   useEffect(() => {
     fetch(`${process.env.PUBLIC_URL}/wmap_tt_binned.json`)
@@ -274,16 +288,15 @@ export default function CosmicOriginTutorial({ onRestart }) {
       <p className="text-gray-600 mb-1">
         Paint temperature fluctuations and watch how the CMB power spectrum reacts.
       </p>
-      <p className="text-blue-500 font-mono text-sm mb-4">
-        Universe Age: 380 kyr (CMB snapshot — no time evolution here)
-      </p>
 
       {/* Layout: grid + controls on top, spectrum below */}
       <div className="flex flex-col items-center gap-4 md:flex-row md:justify-center md:items-start">
         {/* Left: CMB Grid + brushes */}
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex flex-col items-center gap-3 w-full max-w-[520px]">
+
           {/* Brush selector with symbols */}
-<div className="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden">
+<div className="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden w-full justify-between">
+
   {/* Medium brush: single medium dot */}
   <button
     onClick={() => setBrush(BRUSHES.MEDIUM)}
@@ -382,12 +395,12 @@ export default function CosmicOriginTutorial({ onRestart }) {
 
 
           {/* Restart button */}
-          <button
-            onClick={onRestart}
-            className="mt-2 px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 text-sm"
-          >
-            Restart Level
-          </button>
+        <button
+          onClick={handleRestartClick}
+          className="mt-2 px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 text-sm"
+        >
+          Restart Level
+        </button>
         </div>
 
         {/* Right: Power spectrum + teaching text */}
