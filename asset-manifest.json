@@ -1,15 +1,15 @@
 {
   "files": {
-    "main.css": "/galaxsim/static/css/main.f31477e6.css",
-    "main.js": "/galaxsim/static/js/main.188a317a.js",
+    "main.css": "/galaxsim/static/css/main.b1512eb4.css",
+    "main.js": "/galaxsim/static/js/main.d8542704.js",
     "static/js/453.9e10b6e1.chunk.js": "/galaxsim/static/js/453.9e10b6e1.chunk.js",
     "index.html": "/galaxsim/index.html",
-    "main.f31477e6.css.map": "/galaxsim/static/css/main.f31477e6.css.map",
-    "main.188a317a.js.map": "/galaxsim/static/js/main.188a317a.js.map",
+    "main.b1512eb4.css.map": "/galaxsim/static/css/main.b1512eb4.css.map",
+    "main.d8542704.js.map": "/galaxsim/static/js/main.d8542704.js.map",
     "453.9e10b6e1.chunk.js.map": "/galaxsim/static/js/453.9e10b6e1.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.f31477e6.css",
-    "static/js/main.188a317a.js"
+    "static/css/main.b1512eb4.css",
+    "static/js/main.d8542704.js"
   ]
 }
