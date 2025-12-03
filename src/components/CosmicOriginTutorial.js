@@ -245,13 +245,14 @@ export default function CosmicOriginTutorial({ onRestart }) {
       </p> 
 
       {/* Grid */}
-      <div className="overflow-auto border border-gray-700 mx-auto" style={{ maxHeight: '60vh' }}>
+      <div className="overflow-auto border border-gray-700 mx-auto inline-block"
+  style={{ maxHeight: '60vh', width: 'min(100%, 360px)' }}>
         <div
           className="grid"
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-            width: 'min(100%, 360px)',
+            width: '100%', // fill the border box
           }}
         >
           {grid.map((row, rowIndex) =>
