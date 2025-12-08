@@ -144,6 +144,12 @@ const MAX_TEMP = 3;
 const MIN_TEMP = -3;
 const BASE_TEMP = -2.0;
 
+// --- visual-only speckle texture (persistent) ---
+const noiseField = Array.from({ length: GRID_SIZE }, () =>
+  Array.from({ length: GRID_SIZE }, () => Math.random() * 2 - 1)
+);
+
+
 // toy CMB spectrum: big first peak, smaller later peaks
 const WMAP_TOY = [
   { ell: 2,   cl: 900 },
@@ -211,6 +217,26 @@ function applyGaussianErase(grid, row, col, radius) {
   return newGrid;
 }
 
+// Speckle brush: spray several Gaussian bumps around the cursor
+function applySpeckleBrush(grid, row, col, { count, radius, amplitude }) {
+  let newGrid = grid;
+
+  for (let n = 0; n < count; n++) {
+    const angle = Math.random() * 2 * Math.PI;
+    const dist = Math.random() * radius * 1.5; // spread around the center
+
+    const r = row + Math.round(Math.cos(angle) * dist);
+    const c = col + Math.round(Math.sin(angle) * dist);
+
+    // skip if outside grid
+    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) continue;
+
+    newGrid = applyGaussianBump(newGrid, r, c, radius, amplitude);
+  }
+
+  return newGrid;
+}
+
 // ---- toy CMB spectrum in angle space (for gray dashed line) ----
 
 // we'll sample 80 points from left (large angle) to right (small angle)
@@ -272,40 +298,100 @@ export default function CosmicOriginTutorial({ onRestart }) {
     };
 
 
-  // ---- derive current spectrum from grid state ----
-  // ---- derive current spectrum from grid state ----
-  // We build 3 bands: large-scale, medium-scale, small-scale
-  // and turn them into 5 bins with a flat left side + peak in the middle.
-  const currentSpectrum = useMemo(() => {
-    if (!grid || !grid.length) return [];
+  // ---- 5-band power extraction from the map ----
+  const bandPowers = useMemo(() => {
+    if (!grid || !grid.length) return [0, 0, 0, 0, 0];
 
-    // Heavily blurred = only large-scale structure
-    const blurLarge = blurAtRadius(grid, 8);
-    // Moderately blurred = large + medium scales
-    const blurMid = blurAtRadius(grid, 3);
+    // progressively less-blurred maps to isolate different scales
+    const blurL  = blurAtRadius(grid, 10); // very large scales
+    const blurM1 = blurAtRadius(grid, 6);  // first-peak-ish
+    const blurM2 = blurAtRadius(grid, 4);  // second bump
+    const blurM3 = blurAtRadius(grid, 2);  // third / small scales
 
-    const vLarge = Math.max(1e-8, variance2D(blurLarge));
-    const vMidTotal = variance2D(blurMid);
-    const vSmallTotal = variance2D(grid);
+    const vL  = variance2D(blurL);
+    const vM1 = variance2D(blurM1);
+    const vM2 = variance2D(blurM2);
+    const vM3 = variance2D(blurM3);
+    const vS  = variance2D(grid); // smallest scales (no blur)
 
-    // Extra power from medium scales and small scales
-    const vMidExtra = Math.max(0, vMidTotal - vLarge);
-    const vSmallExtra = Math.max(0, vSmallTotal - vMidTotal);
+    // 5 non-overlapping "bands" of power
+    const band0 = vL;                     // large-scale baseline
+    const band1 = Math.max(0, vM1 - vL);  // first peak band
+    const band2 = Math.max(0, vM2 - vM1); // second bump band
+    const band3 = Math.max(0, vM3 - vM2); // third bump band
+    const band4 = Math.max(0, vS  - vM3); // tiny-scale tail
 
-    // Build 5 bins:
-    //  - first two: flat baseline (large-scale)
-    //  - middle: big peak from medium scales
-    //  - right: mix of medium + small scales
-    const raw = [
-      vLarge,                               // left: flat
-      vLarge,                               // left: flat
-      vLarge + 1.3 * vMidExtra,             // main peak
-      vLarge + 0.7 * vMidExtra + 0.5 * vSmallExtra,
-      vLarge + 0.3 * vMidExtra + 0.8 * vSmallExtra,
-    ];
-
-    return normalize01(raw);
+    return [band0, band1, band2, band3, band4];
   }, [grid]);
+
+  // ---- smooth blue spectrum built from the 5 bands ----
+    const currentSpectrum = useMemo(() => {
+      if (!bandPowers || bandPowers.length !== 5) {
+        return Array(TARGET_LEN).fill(0);
+      }
+
+      const [b0, b1, b2, b3, b4] = bandPowers;
+
+      // total variance of the field (sum of bands telescopes to vS)
+      const totalVar = b0 + b1 + b2 + b3 + b4;
+      if (totalVar <= 1e-8) {
+        return Array(TARGET_LEN).fill(0);
+      }
+
+      // Expected CMB-like fraction of power in each band (tweak by feel)
+      //   band0: very large-scale baseline
+      //   band1: first peak (should be biggest)
+      //   band2: second bump
+      //   band3: third bump
+      //   band4: tiny-scale tail
+      const expectedFrac = [0.18, 0.36, 0.22, 0.14, 0.10]; // sums to ~1
+
+      // Extra "visual gain" per band: how strongly each knob moves the curve
+      const bandGain = [0.8, 1.3, 1.0, 0.9, 1.1];
+
+      const bands = [b0, b1, b2, b3, b4];
+
+      // Turn each band into an independent knob Ai ~ [0, 1+]
+      const A = bands.map((b, i) => {
+        const target = expectedFrac[i] * totalVar + 1e-8; // avoid div by 0
+        const raw = b / target;        // 1 ≈ "CMB-like", <1 low, >1 high
+        const scaled = bandGain[i] * raw;
+
+        // Allow slightly >1 before final curve normalization
+        return Math.max(0, Math.min(2.0, scaled));
+      });
+
+      const [a0, a1, a2, a3, a4] = A;
+
+      const vals = [];
+      for (let i = 0; i < TARGET_LEN; i++) {
+        const x = i / (TARGET_LEN - 1); // 0 (large angles) → 1 (small angles)
+
+        // soft baseline envelope: a little rise then fall
+        const env = 0.3 + 0.2 * Math.cos(Math.PI * x);
+
+        // three Gaussian-like bumps at "first", "second", "third" peak positions
+        const peak1 = Math.exp(-Math.pow((x - 0.35) / 0.08, 2)); // ~1°
+        const peak2 = Math.exp(-Math.pow((x - 0.58) / 0.06, 2)); // ~0.5°
+        const peak3 = Math.exp(-Math.pow((x - 0.74) / 0.05, 2)); // ~0.3°
+
+        // small-scale tail near the right edge
+        const tailCore = Math.exp(-Math.pow((x - 0.90) / 0.05, 2));
+
+        let y = 0;
+        y += a0 * env;                              // large-scale baseline
+        y += a1 * peak1;                            // first peak
+        y += a2 * peak2;                            // second bump
+        y += a3 * peak3;                            // third bump
+        y += a4 * (0.4 * peak3 + 0.8 * tailCore);  // tiny-scale tail
+
+        vals.push(y);
+      }
+
+      // Normalize final curve for plotting (shape preserved)
+      return normalize01(vals);
+    }, [bandPowers]);
+
 
   // toy target spectrum & angle ticks (smooth CMB-like gray curve)
   const targetClNorm = useMemo(() => buildToyCMBTarget(), []);
@@ -345,19 +431,28 @@ export default function CosmicOriginTutorial({ onRestart }) {
     if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return;
 
     if (brush === BRUSHES.MEDIUM) {
-      // Medium brush: main acoustic peak
-      const radius = 5;
-      const amplitude = 1.2;
-      setGrid((prev) => applyGaussianBump(prev, row, col, radius, amplitude));
+      // Medium speckle brush → boosts band1 (first peak) & some large scales
+      setGrid((prev) =>
+        applySpeckleBrush(prev, row, col, {
+          count: 12,
+          radius: 4,
+          amplitude: 0.5,
+        })
+      );
     } else if (brush === BRUSHES.TINY) {
-      // Tiny brush: small-scale power
-      const radius = 2;
-      const amplitude = 0.7;
-      setGrid((prev) => applyGaussianBump(prev, row, col, radius, amplitude));
+      // Tiny speckle brush → mostly boosts small-scale tail
+      setGrid((prev) =>
+        applySpeckleBrush(prev, row, col, {
+          count: 6,
+          radius: 2,
+          amplitude: 0.25,
+        })
+      );
     } else if (brush === BRUSHES.ERASE) {
       const radius = 4;
       setGrid((prev) => applyGaussianErase(prev, row, col, radius));
     }
+
   };
 
   return (
@@ -435,8 +530,8 @@ export default function CosmicOriginTutorial({ onRestart }) {
             <div
               className="border border-gray-700 mx-auto"
               style={{
-                width: 'min(100%, 520px)',     // make it BIG
-                height: 'min(70vh, 520px)',    // keep it roughly square
+                width: 'min(100%, 520px)',      // make it BIG
+                height: 'min(70vh, 520px)',     // keep it roughly square
               }}
               onMouseDown={() => setIsPainting(true)}
               onMouseUp={() => setIsPainting(false)}
@@ -448,28 +543,36 @@ export default function CosmicOriginTutorial({ onRestart }) {
                   display: 'grid',
                   gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
                   width: '100%',
-                  height: '100%',              // fill the square
+                  height: '100%',               // fill the square
                 }}
               >
                 {grid.map((row, rowIndex) =>
-                  row.map((cell, colIndex) => (
-                    <div
-                      key={`${rowIndex}-${colIndex}`}
-                      onMouseDown={() => paintAt(rowIndex, colIndex)}
-                      onMouseEnter={() => {
-                        if (isPainting) paintAt(rowIndex, colIndex);
-                      }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        backgroundColor: getColor(cell),
-                        transition: 'background-color 0.2s ease',
-                      }}
-                    />
-                  ))
+                  row.map((cell, colIndex) => {
+                    // --- visual speckle: does NOT affect physics ---
+                    const ε = 2;  // visual noise strength — tweak 0.10–0.40
+                    const noisyTemp =
+                      cell + ε * noiseField[rowIndex][colIndex];
+
+                    return (
+                      <div
+                        key={`${rowIndex}-${colIndex}`}
+                        onMouseDown={() => paintAt(rowIndex, colIndex)}
+                        onMouseEnter={() => {
+                          if (isPainting) paintAt(rowIndex, colIndex);
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: getColor(noisyTemp),  // ← use noisy value
+                          transition: 'background-color 0.2s ease',
+                        }}
+                      />
+                    );
+                  })
                 )}
               </div>
             </div>
+
 
 
           {/* Restart button */}
